@@ -21,7 +21,7 @@ public class CustomerServiceTests
     public CustomerServiceTests()
     {
         _tzMock.Setup(t => t.ToSaoPaulo(It.IsAny<DateTime>()))
-            .Returns((DateTime d) => new DateTimeOffset(d, TimeSpan.FromHours(-3)));
+            .Returns((DateTime d) => new DateTimeOffset(d.Ticks, TimeSpan.FromHours(-3)));
 
         _sut = new CustomerService(_repoMock.Object, _uowMock.Object, _tzMock.Object);
     }

@@ -20,6 +20,9 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.Property(o => o.CreatedAt).IsRequired();
 
+        builder.Property(o => o.RowVersion)
+            .IsRowVersion();
+
         builder.HasOne(o => o.Customer)
             .WithMany()
             .HasForeignKey(o => o.CustomerId)

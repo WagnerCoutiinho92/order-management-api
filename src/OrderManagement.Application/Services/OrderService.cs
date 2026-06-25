@@ -32,56 +32,61 @@ public class OrderService : IOrderService
 
     public async Task<OrderResponse> CreateAsync(CreateOrderRequest request, CancellationToken ct = default)
     {
-        // 1. Validate customer
+        // Validate customer before entering the transaction (no lock needed here)
         var customer = await _customerRepository.GetByIdAsync(request.CustomerId, ct)
             ?? throw new NotFoundException("Cliente", request.CustomerId);
 
         if (!customer.IsActive)
             throw new BusinessRuleException("INACTIVE_CUSTOMER", "Clientes inativos não podem criar pedidos.");
 
-        // 2. Lock and load products inside a transaction (pessimistic concurrency)
         var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
-        var products = await _productRepository.GetByIdsForUpdateAsync(productIds, ct);
+        Order? order = null;
+        List<Domain.Entities.Product>? lockedProducts = null;
 
-        // 3. Validate all products exist
-        var missing = productIds.Except(products.Select(p => p.Id)).ToList();
-        if (missing.Any())
-            throw new BusinessRuleException("PRODUCT_NOT_FOUND",
-                $"Produto(s) não encontrado(s): {string.Join(", ", missing)}.");
-
-        // 4. Validate all products are active and have sufficient stock
-        var productMap = products.ToDictionary(p => p.Id);
-        foreach (var item in request.Items)
+        // Execute stock debit + order creation inside a single transaction.
+        // GetByIdsForUpdateAsync issues UPDLOCK so the lock is held until Commit.
+        await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
-            var product = productMap[item.ProductId];
-            if (!product.IsActive)
-                throw new BusinessRuleException("INACTIVE_PRODUCT",
-                    $"O produto '{product.Name}' está inativo e não pode ser adicionado ao pedido.");
+            lockedProducts = await _productRepository.GetByIdsForUpdateAsync(productIds, ct);
 
-            if (product.StockQuantity < item.Quantity)
-                throw new BusinessRuleException("INSUFFICIENT_STOCK",
-                    $"Estoque insuficiente para '{product.Name}'. Disponível: {product.StockQuantity}, Solicitado: {item.Quantity}.");
-        }
+            // Validate all products exist
+            var missing = productIds.Except(lockedProducts.Select(p => p.Id)).ToList();
+            if (missing.Any())
+                throw new BusinessRuleException("PRODUCT_NOT_FOUND",
+                    $"Produto(s) não encontrado(s): {string.Join(", ", missing)}.");
 
-        // 5. Build order items with price snapshot
-        var orderId = Guid.NewGuid();
-        var orderItems = request.Items.Select(item =>
-        {
-            var product = productMap[item.ProductId];
-            return new OrderItem(orderId, item.ProductId, item.Quantity, product.Price);
-        }).ToList();
+            var productMap = lockedProducts.ToDictionary(p => p.Id);
 
-        // 6. Create order aggregate
-        var order = new Order(request.CustomerId, orderItems);
+            // Validate active + sufficient stock
+            foreach (var item in request.Items)
+            {
+                var product = productMap[item.ProductId];
+                if (!product.IsActive)
+                    throw new BusinessRuleException("INACTIVE_PRODUCT",
+                        $"O produto '{product.Name}' está inativo e não pode ser adicionado ao pedido.");
 
-        // 7. Debit stock — all or nothing (if any throws, transaction rolls back)
-        foreach (var item in request.Items)
-            productMap[item.ProductId].DebitStock(item.Quantity);
+                if (product.StockQuantity < item.Quantity)
+                    throw new BusinessRuleException("INSUFFICIENT_STOCK",
+                        $"Estoque insuficiente para '{product.Name}'. Disponível: {product.StockQuantity}, Solicitado: {item.Quantity}.");
+            }
 
-        await _orderRepository.AddAsync(order, ct);
-        await _unitOfWork.CommitAsync(ct);
+            // Build items with price snapshot
+            var orderId = Guid.NewGuid();
+            var orderItems = request.Items
+                .Select(item => new OrderItem(orderId, item.ProductId, item.Quantity, productMap[item.ProductId].Price))
+                .ToList();
 
-        return await BuildOrderResponseAsync(order, customer, productMap.Values.ToList(), ct);
+            order = new Order(request.CustomerId, orderItems);
+
+            // Debit stock — all or nothing
+            foreach (var item in request.Items)
+                productMap[item.ProductId].DebitStock(item.Quantity);
+
+            await _orderRepository.AddAsync(order, ct);
+            // SaveChanges + Commit happen automatically inside ExecuteInTransactionAsync
+        }, ct);
+
+        return BuildOrderResponse(order!, customer, lockedProducts!);
     }
 
     public async Task<OrderResponse?> GetByIdAsync(Guid id, CancellationToken ct = default)
@@ -99,33 +104,45 @@ public class OrderService : IOrderService
 
     public async Task<OrderResponse> UpdateStatusAsync(Guid id, UpdateOrderStatusRequest request, CancellationToken ct = default)
     {
-        var order = await _orderRepository.GetByIdAsync(id, ct)
+        // Write path: load only what's needed for saving — no Customer/Product navigations.
+        // This prevents EF Core from tracking unrelated entities during SaveChanges,
+        // which was causing spurious DbUpdateConcurrencyException.
+        var order = await _orderRepository.GetByIdForUpdateAsync(id, ct)
             ?? throw new NotFoundException("Pedido", id);
 
         var transitioned = order.TransitionTo(request.Status, request.Reason);
 
-        // Return stock on cancellation only if order hasn't been shipped
         if (transitioned && request.Status == Domain.Enums.OrderStatus.Cancelled && order.CanReturnStock())
         {
-            var productIds = order.Items.Select(i => i.ProductId).ToList();
-            var products = await _productRepository.GetByIdsForUpdateAsync(productIds, ct);
-            var productMap = products.ToDictionary(p => p.Id);
-
-            foreach (var item in order.Items)
+            // Return stock inside a transaction so the UPDLOCK covers the UPDATE
+            await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
-                if (productMap.TryGetValue(item.ProductId, out var product))
-                    product.ReturnStock(item.Quantity);
-            }
-        }
+                var productIds = order.Items.Select(i => i.ProductId).ToList();
+                var products = await _productRepository.GetByIdsForUpdateAsync(productIds, ct);
+                var productMap = products.ToDictionary(p => p.Id);
 
-        await _unitOfWork.CommitAsync(ct);
-        return ToResponse(order);
+                foreach (var item in order.Items)
+                {
+                    if (productMap.TryGetValue(item.ProductId, out var product))
+                        product.ReturnStock(item.Quantity);
+                }
+            }, ct);
+        }
+        else if (transitioned)
+        {
+            await _unitOfWork.CommitAsync(ct);
+        }
+        // If !transitioned (idempotent — same status), nothing to save.
+
+        // Reload with full navigation for the response (AsNoTracking, fresh read).
+        var fullOrder = await _orderRepository.GetByIdAsync(id, ct);
+        return ToResponse(fullOrder!);
     }
 
-    private Task<OrderResponse> BuildOrderResponseAsync(Order order, Customer customer, List<Product> products, CancellationToken ct)
+    private OrderResponse BuildOrderResponse(Order order, Domain.Entities.Customer customer, List<Domain.Entities.Product> products)
     {
         var productMap = products.ToDictionary(p => p.Id);
-        var response = new OrderResponse(
+        return new OrderResponse(
             order.Id,
             order.CustomerId,
             customer.Name,
@@ -141,7 +158,6 @@ public class OrderService : IOrderService
                 i.UnitPrice,
                 i.TotalValue)).ToList(),
             order.StatusHistory.Select(ToHistoryResponse).ToList());
-        return Task.FromResult(response);
     }
 
     private OrderResponse ToResponse(Order order) => new(
@@ -153,12 +169,9 @@ public class OrderService : IOrderService
         order.TotalValue,
         _tz.ToSaoPaulo(order.CreatedAt),
         order.Items.Select(i => new OrderItemResponse(
-            i.Id,
-            i.ProductId,
+            i.Id, i.ProductId,
             i.Product?.Name ?? string.Empty,
-            i.Quantity,
-            i.UnitPrice,
-            i.TotalValue)).ToList(),
+            i.Quantity, i.UnitPrice, i.TotalValue)).ToList(),
         order.StatusHistory.Select(ToHistoryResponse).ToList());
 
     private OrderStatusHistoryResponse ToHistoryResponse(Domain.Entities.OrderStatusHistory h) => new(

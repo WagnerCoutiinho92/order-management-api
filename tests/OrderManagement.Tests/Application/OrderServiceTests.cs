@@ -24,8 +24,14 @@ public class OrderServiceTests
     public OrderServiceTests()
     {
         _tzMock.Setup(t => t.ToSaoPaulo(It.IsAny<DateTime>()))
-            .Returns((DateTime d) => new DateTimeOffset(d, TimeSpan.FromHours(-3)));
-        _uowMock.Setup(u => u.CommitAsync(default)).ReturnsAsync(1);
+            .Returns((DateTime d) => new DateTimeOffset(d.Ticks, TimeSpan.FromHours(-3)));
+
+        _uowMock.Setup(u => u.CommitAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        // ExecuteInTransactionAsync must actually invoke the action so business rules inside run.
+        _uowMock
+            .Setup(u => u.ExecuteInTransactionAsync(It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
+            .Returns<Func<Task>, CancellationToken>((action, _) => action());
 
         _sut = new OrderService(
             _orderRepoMock.Object,
@@ -162,6 +168,8 @@ public class OrderServiceTests
     public async Task UpdateStatus_ValidTransition_ShouldSucceed()
     {
         var order = new Order(Guid.NewGuid(), [new OrderItem(Guid.NewGuid(), Guid.NewGuid(), 1, 10m)]);
+        // Write path uses GetByIdForUpdateAsync; response reload uses GetByIdAsync.
+        _orderRepoMock.Setup(r => r.GetByIdForUpdateAsync(order.Id, default)).ReturnsAsync(order);
         _orderRepoMock.Setup(r => r.GetByIdAsync(order.Id, default)).ReturnsAsync(order);
 
         var result = await _sut.UpdateStatusAsync(order.Id, new UpdateOrderStatusRequest(OrderStatus.Paid));
@@ -173,6 +181,7 @@ public class OrderServiceTests
     public async Task UpdateStatus_SameStatus_IsIdempotentAndReturns200()
     {
         var order = new Order(Guid.NewGuid(), [new OrderItem(Guid.NewGuid(), Guid.NewGuid(), 1, 10m)]);
+        _orderRepoMock.Setup(r => r.GetByIdForUpdateAsync(order.Id, default)).ReturnsAsync(order);
         _orderRepoMock.Setup(r => r.GetByIdAsync(order.Id, default)).ReturnsAsync(order);
 
         // Request Created status when already Created — should not throw
@@ -186,7 +195,7 @@ public class OrderServiceTests
     public async Task UpdateStatus_InvalidTransition_ThrowsBusinessRuleException()
     {
         var order = new Order(Guid.NewGuid(), [new OrderItem(Guid.NewGuid(), Guid.NewGuid(), 1, 10m)]);
-        _orderRepoMock.Setup(r => r.GetByIdAsync(order.Id, default)).ReturnsAsync(order);
+        _orderRepoMock.Setup(r => r.GetByIdForUpdateAsync(order.Id, default)).ReturnsAsync(order);
 
         var act = async () => await _sut.UpdateStatusAsync(
             order.Id, new UpdateOrderStatusRequest(OrderStatus.Shipped)); // Created → Shipped is invalid
@@ -201,6 +210,7 @@ public class OrderServiceTests
         var orderItem = new OrderItem(Guid.NewGuid(), product.Id, 3, 10m);
         var order = new Order(Guid.NewGuid(), [orderItem]);
 
+        _orderRepoMock.Setup(r => r.GetByIdForUpdateAsync(order.Id, default)).ReturnsAsync(order);
         _orderRepoMock.Setup(r => r.GetByIdAsync(order.Id, default)).ReturnsAsync(order);
         _productRepoMock.Setup(r => r.GetByIdsForUpdateAsync(It.IsAny<IEnumerable<Guid>>(), default))
             .ReturnsAsync([product]);
@@ -210,3 +220,4 @@ public class OrderServiceTests
         product.StockQuantity.Should().Be(8); // 5 + 3 returned
     }
 }
+

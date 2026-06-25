@@ -61,8 +61,9 @@ public class OrderStatusTransitionTests
     }
 
     // ── Transições inválidas ──────────────────────────────────────────────
+    // Valid from Paid: only Shipped. Created and Cancelled are invalid.
     [Theory]
-    [InlineData(OrderStatus.Shipped)]
+    [InlineData(OrderStatus.Created)]
     [InlineData(OrderStatus.Cancelled)]
     public void Transition_PaidToInvalidStatus_ShouldThrow(OrderStatus target)
     {
