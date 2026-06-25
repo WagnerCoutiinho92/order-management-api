@@ -28,7 +28,7 @@
 11. [Validações](#validações)
 12. [Testes automatizados](#testes-automatizados)
 13. [Pontos abertos e decisões documentadas](#pontos-abertos-e-decisões-documentadas)
-14. [Fora do escopo](#fora-do-escopo)
+
 
 ---
 
