@@ -1,10 +1,13 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi.Models;
 using OrderManagement.API.Middleware;
 using OrderManagement.Application;
 using OrderManagement.Infrastructure;
 using OrderManagement.Infrastructure.Data;
 using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -37,6 +40,10 @@ builder.Services.AddSwaggerGen(c =>
         c.IncludeXmlComments(xmlPath);
 });
 
+builder.Services
+    .AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database");
+
 // ─── Pipeline ─────────────────────────────────────────────────────────────
 var app = builder.Build();
 
@@ -50,6 +57,28 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var result = JsonSerializer.Serialize(new
+        {
+            status = report.Status.ToString(),
+            duration = report.TotalDuration,
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                duration = e.Value.Duration,
+                description = e.Value.Description,
+                error = e.Value.Exception?.Message
+            })
+        });
+        await context.Response.WriteAsync(result);
+    }
+});
 
 // Auto-apply migrations on startup (development convenience)
 if (app.Environment.IsDevelopment())
