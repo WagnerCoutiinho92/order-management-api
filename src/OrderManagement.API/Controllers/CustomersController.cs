@@ -1,5 +1,7 @@
 using FluentValidation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderManagement.Application.DTOs.Customers;
 using OrderManagement.Application.Interfaces;
 
@@ -10,6 +12,7 @@ namespace OrderManagement.API.Controllers;
 [Route("api/clientes")]
 [Produces("application/json")]
 [Tags("Clientes")]
+[Authorize]
 public class CustomersController : ControllerBase
 {
     private readonly ICustomerService _service;
@@ -21,11 +24,13 @@ public class CustomersController : ControllerBase
         _createValidator = createValidator;
     }
 
-    /// <summary>Cadastra um novo cliente.</summary>
+    /// <summary>Cadastra um novo cliente. Requer perfil Admin.</summary>
     /// <response code="201">Cliente criado com sucesso.</response>
     /// <response code="400">Dados de entrada inválidos.</response>
     /// <response code="422">Regra de negócio violada (e-mail ou documento duplicado).</response>
     [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -66,9 +71,10 @@ public class CustomersController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
-    /// <summary>Ativa ou desativa um cliente.</summary>
+    /// <summary>Ativa ou desativa um cliente. Requer perfil Admin.</summary>
     /// <response code="404">Cliente não encontrado.</response>
     [HttpPatch("{id:guid}/status")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(CustomerResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateCustomerStatusRequest request, CancellationToken ct)

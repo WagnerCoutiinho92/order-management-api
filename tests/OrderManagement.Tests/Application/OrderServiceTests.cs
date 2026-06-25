@@ -220,4 +220,3 @@ public class OrderServiceTests
         product.StockQuantity.Should().Be(8); // 5 + 3 returned
     }
 }
-

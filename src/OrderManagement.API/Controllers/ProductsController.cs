@@ -1,5 +1,7 @@
 using FluentValidation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderManagement.Application.DTOs.Products;
 using OrderManagement.Application.Interfaces;
 using OrderManagement.Application.Validators.Products;
@@ -11,6 +13,7 @@ namespace OrderManagement.API.Controllers;
 [Route("api/produtos")]
 [Produces("application/json")]
 [Tags("Produtos")]
+[Authorize]
 public class ProductsController : ControllerBase
 {
     private readonly IProductService _service;
@@ -35,6 +38,8 @@ public class ProductsController : ControllerBase
 
     /// <summary>Cadastra um novo produto.</summary>
     [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateProductRequest request, CancellationToken ct)
@@ -72,6 +77,7 @@ public class ProductsController : ControllerBase
 
     /// <summary>Atualiza nome e descrição do produto.</summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -86,6 +92,7 @@ public class ProductsController : ControllerBase
 
     /// <summary>Atualiza o preço do produto.</summary>
     [HttpPatch("{id:guid}/preco")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -100,6 +107,7 @@ public class ProductsController : ControllerBase
 
     /// <summary>Atualiza o estoque do produto.</summary>
     [HttpPatch("{id:guid}/estoque")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -112,8 +120,9 @@ public class ProductsController : ControllerBase
         return Ok(await _service.UpdateStockAsync(id, request, ct));
     }
 
-    /// <summary>Ativa ou inativa um produto.</summary>
+    /// <summary>Ativa ou inativa um produto. Requer perfil Admin.</summary>
     [HttpPatch("{id:guid}/status")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateProductStatusRequest request, CancellationToken ct) =>

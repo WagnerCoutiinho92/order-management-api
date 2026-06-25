@@ -10,7 +10,6 @@ public class Order
     public OrderStatus Status { get; private set; }
     public decimal TotalValue { get; private set; }
     public DateTime CreatedAt { get; private set; }
-    public byte[] RowVersion { get; private set; } = [];
 
     // Navigation properties
     public Customer Customer { get; private set; } = null!;

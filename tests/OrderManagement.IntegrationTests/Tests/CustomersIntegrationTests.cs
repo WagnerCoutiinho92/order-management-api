@@ -16,7 +16,7 @@ public class CustomersIntegrationTests : IAsyncLifetime
     public CustomersIntegrationTests(IntegrationTestFixture fixture)
     {
         _fixture = fixture;
-        _client = fixture.CreateClient();
+        _client = fixture.CreateAuthenticatedClient();
     }
 
     public async Task InitializeAsync()

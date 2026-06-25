@@ -11,7 +11,6 @@ public class Product
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 
-
     // EF Core constructor
     private Product() { }
 

@@ -17,7 +17,7 @@ public class OrdersIntegrationTests : IAsyncLifetime
     public OrdersIntegrationTests(IntegrationTestFixture fixture)
     {
         _fixture = fixture;
-        _client = fixture.CreateClient();
+        _client = fixture.CreateAuthenticatedClient();
     }
 
     public async Task InitializeAsync()
@@ -152,6 +152,27 @@ public class OrdersIntegrationTests : IAsyncLifetime
 
     // ── Status ────────────────────────────────────────────────────────────────
 
+    [Fact]
+    public async Task UpdateStatus_CreatedToPaid_Returns200()
+    {
+        var customerId = await CreateActiveCustomerAsync();
+        var (productId, _) = await CreateActiveProductAsync();
+
+        var orderResp = await _client.PostJsonAsync("/api/pedidos", new
+        {
+            customerId,
+            items = new[] { new { productId, quantity = 1 } }
+        });
+        var order = await orderResp.ReadAsAsync<JsonElement>();
+        var orderId = order.GetProperty("id").GetString();
+
+        var response = await _client.PatchJsonAsync($"/api/pedidos/{orderId}/status",
+            new { status = "Paid", reason = "Pagamento confirmado" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var updated = await response.ReadAsAsync<JsonElement>();
+        updated.GetProperty("status").GetString().Should().Be("Paid");
+    }
 
     [Fact]
     public async Task UpdateStatus_InvalidTransition_Returns422()
@@ -193,6 +214,29 @@ public class OrdersIntegrationTests : IAsyncLifetime
             new { status = "Created" });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task CancelOrder_BeforeShipment_ReturnsStockToDatabase()
+    {
+        var customerId = await CreateActiveCustomerAsync();
+        var (productId, _) = await CreateActiveProductAsync(stock: 10);
+
+        var orderResp = await _client.PostJsonAsync("/api/pedidos", new
+        {
+            customerId,
+            items = new[] { new { productId, quantity = 3 } }
+        });
+        var order = await orderResp.ReadAsAsync<JsonElement>();
+        var orderId = order.GetProperty("id").GetString();
+
+        await _client.PatchJsonAsync($"/api/pedidos/{orderId}/status",
+            new { status = "Cancelled", reason = "Cliente desistiu" });
+
+        // Assert stock returned in real DB
+        using var db = _fixture.CreateDbContext();
+        var product = await db.Products.FindAsync(productId);
+        product!.StockQuantity.Should().Be(10); // fully restored
     }
 
     [Fact]

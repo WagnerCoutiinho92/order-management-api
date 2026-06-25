@@ -32,7 +32,7 @@ public class OrderConcurrencyTests : IAsyncLifetime
     public async Task SimultaneousOrders_SameProduct_OnlyOneSucceeds()
     {
         // Arrange: product with stock = 1
-        var setupClient = _fixture.CreateClient();
+        var setupClient = _fixture.CreateAuthenticatedClient();
 
         var customerResp = await setupClient.PostJsonAsync("/api/clientes", new
         {
@@ -60,8 +60,8 @@ public class OrderConcurrencyTests : IAsyncLifetime
         };
 
         // Act: fire 2 requests simultaneously using separate HttpClients
-        var client1 = _fixture.CreateClient();
-        var client2 = _fixture.CreateClient();
+        var client1 = _fixture.CreateAuthenticatedClient();
+        var client2 = _fixture.CreateAuthenticatedClient();
 
         var responses = await Task.WhenAll(
             client1.PostJsonAsync("/api/pedidos", orderPayload),
@@ -85,7 +85,7 @@ public class OrderConcurrencyTests : IAsyncLifetime
     [Fact]
     public async Task FiveConcurrentOrders_Stock3_ExactlyThreeSucceed()
     {
-        var setupClient = _fixture.CreateClient();
+        var setupClient = _fixture.CreateAuthenticatedClient();
 
         var customerResp = await setupClient.PostJsonAsync("/api/clientes", new
         {
@@ -114,7 +114,7 @@ public class OrderConcurrencyTests : IAsyncLifetime
 
         // Fire 5 concurrent requests
         var tasks = Enumerable.Range(0, 5)
-            .Select(_ => _fixture.CreateClient().PostJsonAsync("/api/pedidos", payload));
+            .Select(_ => _fixture.CreateAuthenticatedClient().PostJsonAsync("/api/pedidos", payload));
 
         var responses = await Task.WhenAll(tasks);
 

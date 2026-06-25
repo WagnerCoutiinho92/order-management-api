@@ -1,5 +1,7 @@
 using FluentValidation;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OrderManagement.Application.DTOs.Orders;
 using OrderManagement.Application.Interfaces;
 
@@ -10,6 +12,7 @@ namespace OrderManagement.API.Controllers;
 [Route("api/pedidos")]
 [Produces("application/json")]
 [Tags("Pedidos")]
+[Authorize]
 public class OrdersController : ControllerBase
 {
     private readonly IOrderService _service;
@@ -30,6 +33,7 @@ public class OrdersController : ControllerBase
     /// <response code="400">Dados de entrada inválidos.</response>
     /// <response code="422">Regra de negócio violada (cliente inativo, produto sem estoque, etc.).</response>
     [HttpPost]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]

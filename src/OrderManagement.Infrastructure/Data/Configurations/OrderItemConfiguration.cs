@@ -18,7 +18,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
             .IsRequired()
             .HasColumnType("decimal(18,2)");
 
-        // TotalValue é calculado em C# (UnitPrice * Quantity) — não armazenado no banco.
+        // TotalValue is a C# computed property (UnitPrice * Quantity) — not stored in the DB.
         builder.Ignore(i => i.TotalValue);
 
         builder.HasOne(i => i.Product)
